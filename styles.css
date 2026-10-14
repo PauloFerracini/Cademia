@@ -12,13 +12,22 @@
   --raio: 14px;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1412;
     --card: #18201c;
     --txt: #e6ece9;
     --muted: #93a19a;
     --borda: #2a3530;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1412;
+  --card: #18201c;
+  --txt: #e6ece9;
+  --muted: #93a19a;
+  --borda: #2a3530;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body {
@@ -31,12 +40,14 @@ body {
 .topo {
   background: linear-gradient(135deg, var(--primaria), var(--primaria-esc));
   color: #fff;
-  padding: 20px 16px 16px;
+  padding-block: 20px 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 .topo h1 { margin: 0; font-size: 1.6rem; }
 .sub { margin: 2px 0 0; opacity: .9; }
 .abas {
-  position: sticky; top: 0; z-index: 5;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
   display: flex; overflow-x: auto;
   background: var(--card); border-bottom: 1px solid var(--borda);
 }
@@ -46,7 +57,11 @@ body {
   border-bottom: 3px solid transparent;
 }
 .aba.ativa { color: var(--primaria); border-bottom-color: var(--primaria); }
-main { max-width: 860px; margin: 0 auto; padding: 16px; }
+main {
+  max-width: 860px; margin: 0 auto; padding-block: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
 .painel { display: none; }
 .painel.ativo { display: block; }
 .card {
