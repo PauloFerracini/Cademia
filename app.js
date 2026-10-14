@@ -187,6 +187,10 @@ function renderDieta() {
 }
 
 // ---------- Diário ----------
+// Itens do diário: {id, gramas} da base de alimentos, ou {nome, gramas, kcal, p, c, g, foto} estimados por foto
+const nutriItem = a => (a.id ? nutrientes(a.id, a.gramas) : { kcal: a.kcal, p: a.p, c: a.c, g: a.g });
+const nomeItem = a => (a.id ? foodById[a.id].nome : a.nome);
+
 function diaAtual() {
   return store.get('dia.' + hoje(), { alimentos: [], treinos: [] });
 }
@@ -210,7 +214,7 @@ formAlimento.addEventListener('submit', e => {
 
 function renderDiario() {
   const dia = diaAtual();
-  const consumido = somar(dia.alimentos.map(a => nutrientes(a.id, a.gramas)));
+  const consumido = somar(dia.alimentos.map(nutriItem));
   const queimado = dia.treinos.reduce((s, t) => s + t.kcal, 0);
   const meta = plano ? plano.meta : 0;
   const restante = meta - consumido.kcal + queimado;
@@ -225,8 +229,8 @@ function renderDiario() {
   const lc = $('#lista-consumo');
   lc.innerHTML = dia.alimentos.length
     ? dia.alimentos.map((a, i) => {
-        const n = nutrientes(a.id, a.gramas);
-        return `<li><span>${esc(foodById[a.id].nome)} <span class="muted">· ${a.gramas} g</span></span>
+        const n = nutriItem(a);
+        return `<li><span>${esc(nomeItem(a))} <span class="muted">· ${a.gramas} g${a.foto ? ' · 📷 estimado' : ''}</span></span>
           <span>${fmt(n.kcal)} kcal <button class="x" data-rm-al="${i}" aria-label="Remover">×</button></span></li>`;
       }).join('')
     : '<li class="vazio">Nada registrado ainda.</li>';
@@ -242,6 +246,132 @@ function renderDiario() {
   lt.querySelectorAll('[data-rm-tr]').forEach(b => b.addEventListener('click', () => {
     const d = diaAtual(); d.treinos.splice(+b.dataset.rmTr, 1); salvarDia(d); renderDiario();
   }));
+}
+
+// ---------- Calorias por foto (usa o Claude quando o app está aberto pelo claude.ai) ----------
+const foto = {
+  sample: null,
+  arquivo: null,
+  ctl: null,
+  itens: [],
+};
+
+(async () => {
+  const info = $('#foto-info');
+  try {
+    foto.sample = window.claude ? await window.claude.use('sample') : null;
+    const lim = foto.sample ? await foto.sample.limits().catch(() => null) : null;
+    if (!lim || !lim.images) {
+      info.textContent = 'A análise por foto funciona quando o app é aberto pelo link do Claude (claude.ai). Nesta versão, registre os alimentos manualmente acima.';
+      return;
+    }
+    $('#foto-input').accept = lim.images.mediaTypes.join(',');
+    $('#foto-controles').hidden = false;
+  } catch {
+    info.textContent = 'A análise por foto não está disponível agora.';
+  }
+})();
+
+$('#foto-input').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  foto.arquivo = f;
+  const prev = $('#foto-preview');
+  if (prev.src) URL.revokeObjectURL(prev.src);
+  prev.src = URL.createObjectURL(f);
+  prev.hidden = false;
+  $('#foto-rotulo').hidden = true;
+  $('#foto-analisar').disabled = false;
+  $('#foto-resultado').innerHTML = '';
+});
+
+$('#foto-parar').addEventListener('click', () => foto.ctl && foto.ctl.abort());
+
+const MSG_ERRO_FOTO = {
+  not_granted: 'Você não permitiu que o app use o Claude. Para usar a foto, permita no menu de permissões da página.',
+  sampling_disabled: 'O Claude não está disponível para esta conta.',
+  images_unavailable: 'Esta visualização não consegue enviar imagens.',
+  image_rejected: 'Não foi possível ler essa imagem. Tente outra foto (JPG ou PNG).',
+  rate_limited: 'Muitas análises em pouco tempo. Aguarde um pouco e tente de novo.',
+  session_expired: 'Sua sessão expirou. Entre novamente no claude.ai.',
+  refused: 'Não foi possível analisar essa foto. Tente uma foto só do prato.',
+  invalid_json: 'A resposta veio incompleta. Toque em "Analisar foto" para tentar de novo.',
+};
+
+$('#foto-analisar').addEventListener('click', async () => {
+  if (!foto.sample || !foto.arquivo) return;
+  const res = $('#foto-resultado');
+  const btn = $('#foto-analisar');
+  const parar = $('#foto-parar');
+  btn.disabled = true;
+  parar.hidden = false;
+  res.innerHTML = '<p class="muted">Analisando a foto… isso pode levar alguns segundos.</p>';
+  foto.ctl = new AbortController();
+  const obs = $('#foto-obs').value.trim();
+  const prompt = `Você é um nutricionista. A imagem é a foto de uma refeição.
+Identifique cada alimento visível e estime a porção em gramas e os nutrientes dessa porção, usando valores de tabelas brasileiras (TACO) quando possível.
+${obs ? 'Informação do usuário sobre o prato: ' + obs + '\n' : ''}Responda somente com JSON neste formato:
+{"itens":[{"nome":"Arroz branco cozido","gramas":120,"kcal":154,"proteina":3,"carboidrato":34,"gordura":0.3}],"confianca":"alta|media|baixa","observacao":"frase curta em português"}
+Se a imagem não mostrar comida, responda {"itens":[],"confianca":"baixa","observacao":"explique o motivo"}.`;
+  try {
+    const r = await foto.sample.json(prompt, { images: foto.arquivo, signal: foto.ctl.signal });
+    const num = v => Math.max(0, Number(v) || 0);
+    foto.itens = (Array.isArray(r && r.itens) ? r.itens : [])
+      .map(i => ({ nome: String(i.nome || 'Alimento').slice(0, 80), gramas: Math.round(num(i.gramas)), kcal: num(i.kcal), p: num(i.proteina), c: num(i.carboidrato), g: num(i.gordura), usar: true }))
+      .filter(i => i.gramas > 0);
+    renderFotoResultado(r);
+  } catch (e) {
+    res.innerHTML = e && e.code === 'cancelled' ? '' : `<p class="erro">${esc(MSG_ERRO_FOTO[e && e.code] || 'Não foi possível analisar agora. Tente de novo em instantes.')}</p>`;
+  } finally {
+    btn.disabled = false;
+    parar.hidden = true;
+  }
+});
+
+function renderFotoResultado(r) {
+  const res = $('#foto-resultado');
+  const obs = r && r.observacao ? `<p class="muted">${esc(String(r.observacao))}</p>` : '';
+  if (!foto.itens.length) {
+    res.innerHTML = obs || '<p class="muted">Nenhum alimento identificado.</p>';
+    return;
+  }
+  const conf = { alta: 'alta', media: 'média', baixa: 'baixa' }[r && r.confianca] || '';
+  res.innerHTML = `
+    ${obs}
+    ${conf ? `<p class="muted">Confiança da estimativa: <b>${conf}</b>. Ajuste as gramas se souber o peso real.</p>` : ''}
+    <ul class="lista foto-itens">
+      ${foto.itens.map((i, k) => `
+        <li>
+          <label class="nome" for="fi-${k}"><input type="checkbox" id="fi-${k}" data-k="${k}" ${i.usar ? 'checked' : ''}> ${esc(i.nome)}</label>
+          <span><input type="number" id="fg-${k}" data-g="${k}" min="1" max="2000" value="${i.gramas}"> g · <b data-kc="${k}">${fmt(i.kcal)}</b> kcal</span>
+        </li>`).join('')}
+    </ul>
+    <p class="foto-total" id="foto-total"></p>
+    <button class="btn" id="foto-adicionar" type="button">Adicionar ao diário</button>`;
+  const total = () => {
+    const t = somar(foto.itens.filter(i => i.usar));
+    $('#foto-total').textContent = `Total: ${fmt(t.kcal)} kcal · P ${fmt(t.p)} g · C ${fmt(t.c)} g · G ${fmt(t.g)} g`;
+  };
+  res.querySelectorAll('[data-k]').forEach(cb => cb.addEventListener('change', () => { foto.itens[+cb.dataset.k].usar = cb.checked; total(); }));
+  res.querySelectorAll('[data-g]').forEach(inp => inp.addEventListener('input', () => {
+    const i = foto.itens[+inp.dataset.g];
+    const novo = +inp.value;
+    if (!(novo > 0) || !i.gramas) return;
+    const f = novo / i.gramas; // mantém a proporção estimada por grama
+    Object.assign(i, { gramas: novo, kcal: i.kcal * f, p: i.p * f, c: i.c * f, g: i.g * f });
+    res.querySelector(`[data-kc="${inp.dataset.g}"]`).textContent = fmt(i.kcal);
+    total();
+  }));
+  total();
+  $('#foto-adicionar').addEventListener('click', () => {
+    const escolhidos = foto.itens.filter(i => i.usar);
+    if (!escolhidos.length) return;
+    const dia = diaAtual();
+    escolhidos.forEach(i => dia.alimentos.push({ nome: i.nome, gramas: i.gramas, kcal: Math.round(i.kcal), p: +i.p.toFixed(1), c: +i.c.toFixed(1), g: +i.g.toFixed(1), foto: true }));
+    salvarDia(dia);
+    renderDiario();
+    res.innerHTML = `<p>Adicionado ao diário: ${escolhidos.length} ${escolhidos.length === 1 ? 'item' : 'itens'}.</p>`;
+  });
 }
 
 // ---------- Exercícios ----------

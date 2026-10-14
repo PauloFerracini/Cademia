@@ -91,6 +91,25 @@
         </div>
         <button class="btn" type="submit">Adicionar</button>
       </form>
+      <div class="card" id="card-foto">
+        <h3>Calorias por foto</h3>
+        <p class="muted" id="foto-info">Tire ou escolha uma foto do prato. O Claude identifica os alimentos e estima porções e calorias.</p>
+        <div id="foto-controles" hidden>
+          <label class="foto-escolher" for="foto-input">
+            <img id="foto-preview" alt="Prévia da foto do prato" hidden>
+            <span id="foto-rotulo">Toque para tirar ou escolher uma foto</span>
+          </label>
+          <input id="foto-input" type="file" accept="image/*" capture="environment" hidden>
+          <label for="foto-obs">Detalhes (opcional)
+            <input id="foto-obs" type="text" maxlength="200" placeholder="Ex.: frango frito, prato fundo, sem molho">
+          </label>
+          <div class="acoes" style="justify-content:flex-start;margin-top:10px">
+            <button class="btn" id="foto-analisar" type="button" disabled>Analisar foto</button>
+            <button class="btn sec" id="foto-parar" type="button" hidden>Parar</button>
+          </div>
+        </div>
+        <div id="foto-resultado"></div>
+      </div>
       <div class="card">
         <h3>Consumido hoje</h3>
         <ul id="lista-consumo" class="lista"></ul>
